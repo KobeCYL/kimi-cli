@@ -13,7 +13,8 @@ from kimi_cli.soul import wire_send
 from kimi_cli.soul.agent import load_agents_md
 from kimi_cli.soul.context import Context
 from kimi_cli.soul.message import system
-from kimi_cli.utils.slashcmd import SlashCommandRegistry
+from kimi_cli.soul.slash_ext import SlashExtensionLoader
+from kimi_cli.utils.slashcmd import SlashCommand, SlashCommandRegistry
 from kimi_cli.wire.types import StatusUpdate, TextPart
 
 if TYPE_CHECKING:
@@ -28,6 +29,23 @@ Raises:
 """
 
 registry = SlashCommandRegistry[SoulSlashCmdFunc]()
+
+
+def find_command(name: str) -> SlashCommand[SoulSlashCmdFunc] | None:
+    """Find a command by name, checking built-in and custom commands."""
+    # First check built-in registry
+    cmd = registry.find_command(name)
+    if cmd is not None:
+        return cmd
+    # Then check custom extension registry
+    return SlashExtensionLoader.find_soul_command(name)
+
+
+def list_commands() -> list[SlashCommand[SoulSlashCmdFunc]]:
+    """List all commands including custom extensions."""
+    built_in = registry.list_commands()
+    custom = SlashExtensionLoader.get_soul_commands()
+    return built_in + custom
 
 
 @registry.command

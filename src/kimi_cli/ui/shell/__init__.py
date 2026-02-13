@@ -19,6 +19,8 @@ from kimi_cli.soul.kimisoul import KimiSoul
 from kimi_cli.ui.shell.console import console
 from kimi_cli.ui.shell.prompt import CustomPromptSession, PromptMode, toast
 from kimi_cli.ui.shell.replay import replay_recent_history
+from kimi_cli.ui.shell.slash import find_command as find_shell_slash_command
+from kimi_cli.ui.shell.slash import list_commands as list_shell_slash_commands
 from kimi_cli.ui.shell.slash import registry as shell_slash_registry
 from kimi_cli.ui.shell.slash import shell_mode_registry
 from kimi_cli.ui.shell.update import LATEST_VERSION_FILE, UpdateResult, do_update, semver_tuple
@@ -34,14 +36,37 @@ from kimi_cli.wire.types import ContentPart, StatusUpdate
 
 class Shell:
     def __init__(self, soul: Soul, welcome_info: list[WelcomeInfoItem] | None = None):
+        from kimi_cli.soul.slash_ext import SlashExtensionLoader
+        
         self.soul = soul
         self._welcome_info = list(welcome_info or [])
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        
+        # Load custom extension commands
+        self._load_custom_commands()
+        
         self._available_slash_commands: dict[str, SlashCommand[Any]] = {
             **{cmd.name: cmd for cmd in soul.available_slash_commands},
             **{cmd.name: cmd for cmd in shell_slash_registry.list_commands()},
+            **{cmd.name: cmd for cmd in SlashExtensionLoader.get_shell_commands()},
         }
-        """Shell-level slash commands + soul-level slash commands. Name to command mapping."""
+        """Shell-level slash commands + soul-level slash commands + custom commands. Name to command mapping."""
+        
+    def _load_custom_commands(self) -> None:
+        """Load custom slash command extensions from ~/.kimi/commands/ and .kimi/commands/."""
+        from kimi_cli.soul.slash_ext import init_custom_commands
+        from pathlib import Path
+        
+        work_dir = None
+        if hasattr(self.soul, 'runtime') and self.soul.runtime:
+            work_dir = getattr(self.soul.runtime.builtin_args, 'KIMI_WORK_DIR', None)
+        
+        result = init_custom_commands(work_dir=work_dir)
+        if result.get('loaded'):
+            logger.info(f"Loaded custom slash commands: {result['loaded']}")
+        if result.get('errors'):
+            for error in result['errors']:
+                logger.warning(f"Failed to load custom command: {error}")
 
     @property
     def available_slash_commands(self) -> dict[str, SlashCommand[Any]]:
@@ -74,7 +99,8 @@ class Shell:
             model_name=self.soul.model_name,
             thinking=self.soul.thinking or False,
             agent_mode_slash_commands=list(self._available_slash_commands.values()),
-            shell_mode_slash_commands=shell_mode_registry.list_commands(),
+            shell_mode_slash_commands=list(shell_mode_registry.list_commands()) + 
+                                      list(SlashExtensionLoader.get_shell_commands()),
         ) as prompt_session:
             try:
                 while True:
@@ -122,7 +148,11 @@ class Shell:
 
         # Check if it's an allowed slash command in shell mode
         if slash_cmd_call := parse_slash_command_call(command):
-            if shell_mode_registry.find_command(slash_cmd_call.name):
+            from kimi_cli.soul.slash_ext import SlashExtensionLoader
+            
+            # Check built-in shell mode commands or custom extension commands
+            if (shell_mode_registry.find_command(slash_cmd_call.name) or 
+                SlashExtensionLoader.find_shell_command(slash_cmd_call.name)):
                 await self._run_slash_command(slash_cmd_call)
                 return
             else:
@@ -174,6 +204,7 @@ class Shell:
 
     async def _run_slash_command(self, command_call: SlashCommandCall) -> None:
         from kimi_cli.cli import Reload, SwitchToWeb
+        from kimi_cli.soul.slash_ext import SlashExtensionLoader
 
         if command_call.name not in self._available_slash_commands:
             logger.info("Unknown slash command /{command}", command=command_call.name)
@@ -184,6 +215,9 @@ class Shell:
             return
 
         command = shell_slash_registry.find_command(command_call.name)
+        if command is None:
+            # Check custom extension commands
+            command = SlashExtensionLoader.find_shell_command(command_call.name)
         if command is None:
             # the input is a soul-level slash command call
             await self.run_soul_command(command_call.raw_input)

@@ -34,6 +34,7 @@ from kimi_cli.soul.agent import Agent, Runtime
 from kimi_cli.soul.compaction import SimpleCompaction
 from kimi_cli.soul.context import Context
 from kimi_cli.soul.message import check_message, system, tool_result_to_message
+from kimi_cli.soul.slash import find_command as find_soul_slash_command
 from kimi_cli.soul.slash import registry as soul_slash_registry
 from kimi_cli.soul.toolset import KimiToolset
 from kimi_cli.tools.dmail import NAME as SendDMail_NAME
@@ -220,7 +221,10 @@ class KimiSoul:
         return await self._agent_loop()
 
     def _build_slash_commands(self) -> list[SlashCommand[Any]]:
-        commands: list[SlashCommand[Any]] = list(soul_slash_registry.list_commands())
+        from kimi_cli.soul.slash import list_commands as list_soul_slash_commands
+        
+        # Include built-in and custom extension commands
+        commands: list[SlashCommand[Any]] = list(list_soul_slash_commands())
         seen_names = {cmd.name for cmd in commands}
 
         for skill in self._runtime.skills.values():
@@ -281,7 +285,11 @@ class KimiSoul:
         return indexed
 
     def _find_slash_command(self, name: str) -> SlashCommand[Any] | None:
-        return self._slash_command_map.get(name)
+        # First check built-in commands and skills
+        if name in self._slash_command_map:
+            return self._slash_command_map[name]
+        # Then check custom extension commands
+        return find_soul_slash_command(name)
 
     def _make_skill_runner(self, skill: Skill) -> Callable[[KimiSoul, str], None | Awaitable[None]]:
         async def _run_skill(soul: KimiSoul, args: str, *, _skill: Skill = skill) -> None:

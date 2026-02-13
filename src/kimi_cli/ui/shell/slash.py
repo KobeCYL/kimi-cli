@@ -11,6 +11,7 @@ from kimi_cli.config import load_config, save_config
 from kimi_cli.exception import ConfigError
 from kimi_cli.session import Session
 from kimi_cli.soul.kimisoul import KimiSoul
+from kimi_cli.soul.slash_ext import SlashExtensionLoader
 from kimi_cli.ui.shell.console import console
 from kimi_cli.utils.changelog import CHANGELOG
 from kimi_cli.utils.datetime import format_relative_time
@@ -30,6 +31,27 @@ Raises:
 
 registry = SlashCommandRegistry[ShellSlashCmdFunc]()
 shell_mode_registry = SlashCommandRegistry[ShellSlashCmdFunc]()
+
+
+def find_command(name: str) -> SlashCommand[ShellSlashCmdFunc] | None:
+    """Find a command by name, checking built-in and custom commands."""
+    # First check built-in registries
+    cmd = registry.find_command(name)
+    if cmd is not None:
+        return cmd
+    cmd = shell_mode_registry.find_command(name)
+    if cmd is not None:
+        return cmd
+    # Then check custom extension registry
+    return SlashExtensionLoader.find_shell_command(name)
+
+
+def list_commands() -> list[SlashCommand[ShellSlashCmdFunc]]:
+    """List all commands including custom extensions."""
+    built_in = registry.list_commands()
+    shell_mode = shell_mode_registry.list_commands()
+    custom = SlashExtensionLoader.get_shell_commands()
+    return built_in + shell_mode + custom
 
 
 def _ensure_kimi_soul(app: Shell) -> KimiSoul | None:
