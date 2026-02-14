@@ -68,6 +68,17 @@ class QueryAnalyzer:
         return "technical", cls.WEIGHTS["technical"]
 
 
+def _send_message(text: str) -> None:
+    """发送消息到 UI, 支持 wire_send 降级到 print"""
+    try:
+        from kimi_cli.soul import wire_send
+        from kimi_cli.wire.types import TextPart
+        wire_send(TextPart(text=text))
+    except Exception:
+        # wire 不可用, 使用 print
+        print(text)
+
+
 async def recall_command(soul, args: str):
     """
     召回相关历史对话
@@ -79,9 +90,6 @@ async def recall_command(soul, args: str):
     /recall --stats      - 显示记忆统计
     /recall --verbose    - 详细模式(显示消息ID和完整预览)
     """
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     args = args.strip()
     
     # 检查详细模式
@@ -91,7 +99,7 @@ async def recall_command(soul, args: str):
     # 初始化服务
     service = MemoryService()
     if not service.initialize():
-        wire_send(TextPart(text="记忆服务初始化失败"))
+        _send_message("记忆服务初始化失败, 请先运行 /memory init")
         return
     
     try:
@@ -113,9 +121,6 @@ async def recall_command(soul, args: str):
 
 async def _do_recall(service: MemoryService, soul, query: str, verbose: bool = False):
     """执行召回"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     # 获取当前会话信息
     current_session_id = ""
     context_text = query
@@ -137,7 +142,7 @@ async def _do_recall(service: MemoryService, soul, query: str, verbose: bool = F
         pass
     
     if not context_text:
-        wire_send(TextPart(text="无法获取上下文, 请输入关键词:\n/recall \"你的查询\""))
+        _send_message("无法获取上下文, 请输入关键词:\n/recall \"你的查询\"")
         return
     
     # 分析查询类型
@@ -148,7 +153,7 @@ async def _do_recall(service: MemoryService, soul, query: str, verbose: bool = F
     loading_text = f"正在搜索相关记忆... [{search_desc}]"
     if verbose:
         loading_text += f"\n   搜索策略: 向量{weights['vector']:.0%} + 关键词{weights['keyword']:.0%}"
-    wire_send(TextPart(text=loading_text))
+    _send_message(loading_text)
     
     # 执行召回(传递权重)
     results = service.recall(
@@ -160,7 +165,7 @@ async def _do_recall(service: MemoryService, soul, query: str, verbose: bool = F
     )
     
     if not results:
-        wire_send(TextPart(text="未找到相关历史对话"))
+        _send_message("未找到相关历史对话")
         return
     
     # 构建增强的结果展示
@@ -232,7 +237,7 @@ async def _do_recall(service: MemoryService, soul, query: str, verbose: bool = F
     if not verbose:
         lines.append("提示: 使用 /recall --verbose 查看详细信息和消息ID")
     
-    wire_send(TextPart(text="\n".join(lines)))
+    _send_message("\n".join(lines))
     
     # 构建并发送 prompt 上下文
     prompt_context = service.get_recall_context(
@@ -242,20 +247,21 @@ async def _do_recall(service: MemoryService, soul, query: str, verbose: bool = F
     
     if prompt_context:
         # 将上下文添加到系统提示
-        from kimi_cli.soul.message import system
-        from kosong.message import Message
-        
-        system_message = system(prompt_context)
-        await soul.context.append_message(
-            Message(role="user", content=[system_message])
-        )
+        try:
+            from kimi_cli.soul.message import system
+            from kosong.message import Message
+            
+            system_message = system(prompt_context)
+            await soul.context.append_message(
+                Message(role="user", content=[system_message])
+            )
+        except Exception as e:
+            # 静默失败, 不影响主流程
+            pass
 
 
 async def _show_stats(service: MemoryService):
     """显示统计信息"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     stats = service.get_stats()
     
     lines = [
@@ -282,18 +288,15 @@ async def _show_stats(service: MemoryService):
         "  * 技术问题 - 默认混合检索",
     ])
     
-    wire_send(TextPart(text="\n".join(lines)))
+    _send_message("\n".join(lines))
 
 
 async def _list_sessions(service: MemoryService):
     """列会话列表"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     sessions = service.storage.list_sessions(limit=20)
     
     if not sessions:
-        wire_send(TextPart(text="暂无会话记录"))
+        _send_message("暂无会话记录")
         return
     
     lines = ["最近会话:", ""]
@@ -312,7 +315,7 @@ async def _list_sessions(service: MemoryService):
         # 添加查看命令
         lines.append(f"    查看: /session {session.id}")
     
-    wire_send(TextPart(text="\n".join(lines)))
+    _send_message("\n".join(lines))
 
 
 # 导出供装饰器使用

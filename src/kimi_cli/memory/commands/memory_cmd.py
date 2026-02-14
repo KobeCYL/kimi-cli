@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from kimi_cli.memory.services.memory_service import MemoryService
 from kimi_cli.memory.models.data import MemoryConfig
 
 
+def _send_message(text: str) -> None:
+    """发送消息到 UI, 支持 wire_send 降级到 print"""
+    try:
+        from kimi_cli.soul import wire_send
+        from kimi_cli.wire.types import TextPart
+        wire_send(TextPart(text=text))
+    except Exception:
+        # wire 不可用, 使用 print
+        print(text)
+
+
 async def memory_command(soul, args: str):
     """
-    💾 记忆系统管理
+    记忆系统管理
     
     用法:
     /memory init                - 初始化记忆系统
@@ -24,9 +36,6 @@ async def memory_command(soul, args: str):
     /memory config              - 显示配置
     /memory config --edit       - 编辑配置
     """
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     args = args.strip()
     parts = args.split()
     subcmd = parts[0] if parts else "status"
@@ -48,8 +57,8 @@ async def memory_command(soul, args: str):
         edit_mode = "--edit" in parts
         await _cmd_config(edit_mode)
     else:
-        wire_send(TextPart(text=f"""
-💾 Memory 管理命令
+        _send_message(f"""
+记忆系统管理
 
 用法:
   /memory init          - 初始化记忆系统
@@ -61,15 +70,12 @@ async def memory_command(soul, args: str):
 
 当前工作目录: {Path.cwd()}
 配置目录: ~/.kimi/memory/
-"""))
+""")
 
 
 async def _cmd_init():
     """初始化命令"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
-    wire_send(TextPart(text="🚀 初始化记忆系统..."))
+    _send_message("正在初始化记忆系统...")
     
     try:
         # 创建目录
@@ -85,35 +91,32 @@ async def _cmd_init():
         # 初始化服务
         service = MemoryService(config)
         if service.initialize():
-            wire_send(TextPart(text=f"""
-✅ 记忆系统初始化成功！
+            _send_message(f"""
+记忆系统初始化成功!
 
 配置目录: {memory_dir}
 数据库: {config.storage.db_path}
 
-下次启动 Kimi 时会自动加载记忆系统。
-"""))
+下次启动 Kimi 时会自动加载记忆系统.
+""")
         else:
-            wire_send(TextPart(text="❌ 初始化失败"))
+            _send_message("初始化失败")
         
         service.close()
         
     except Exception as e:
-        wire_send(TextPart(text=f"❌ 错误: {e}"))
+        _send_message(f"错误: {e}")
 
 
 async def _cmd_status():
     """状态命令"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     service = MemoryService()
     if not service.initialize():
-        wire_send(TextPart(text="""
-⚠️ 记忆系统未初始化
+        _send_message("""
+记忆系统未初始化
 
-请运行：/memory init
-"""))
+请运行: /memory init
+""")
         return
     
     try:
@@ -121,7 +124,7 @@ async def _cmd_status():
         config = service.config
         
         lines = [
-            "📊 记忆系统状态",
+            "记忆系统状态",
             "",
             f"存储后端: {config.storage.backend}",
             f"数据库路径: {config.storage.db_path}",
@@ -132,13 +135,13 @@ async def _cmd_status():
             f"  总会话: {stats.get('total_sessions', 0)}",
             f"  总消息: {stats.get('total_messages', 0)}",
             f"  总Token: {stats.get('total_tokens', 0):,}",
-            f"  向量支持: {'✅' if stats.get('vec_available') else '❌'}",
+            f"  向量支持: {'是' if stats.get('vec_available') else '否'}",
         ]
         
         if 'indexed_vectors' in stats:
             lines.append(f"  已索引: {stats['indexed_vectors']}")
         
-        wire_send(TextPart(text="\n".join(lines)))
+        _send_message("\n".join(lines))
         
     finally:
         service.close()
@@ -146,12 +149,9 @@ async def _cmd_status():
 
 async def _cmd_index(soul):
     """索引当前会话"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     service = MemoryService()
     if not service.initialize():
-        wire_send(TextPart(text="⚠️ 请先运行 /memory init"))
+        _send_message("请先运行 /memory init")
         return
     
     try:
@@ -161,15 +161,15 @@ async def _cmd_index(soul):
             session_id = getattr(soul.context, 'session_id', '')
         
         if not session_id:
-            wire_send(TextPart(text="⚠️ 无法获取当前会话ID"))
+            _send_message("无法获取当前会话ID")
             return
         
-        wire_send(TextPart(text=f"🔄 正在索引会话: {session_id[:8]}..."))
+        _send_message(f"正在索引会话: {session_id[:8]}...")
         
         if service.index_session(session_id, force=True):
-            wire_send(TextPart(text="✅ 索引完成"))
+            _send_message("索引完成")
         else:
-            wire_send(TextPart(text="⚠️ 索引失败或会话不存在"))
+            _send_message("索引失败或会话不存在")
             
     finally:
         service.close()
@@ -177,20 +177,17 @@ async def _cmd_index(soul):
 
 async def _cmd_index_all():
     """批量索引"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     service = MemoryService()
     if not service.initialize():
-        wire_send(TextPart(text="⚠️ 请先运行 /memory init"))
+        _send_message("请先运行 /memory init")
         return
     
     try:
-        wire_send(TextPart(text="🔄 正在批量索引会话..."))
+        _send_message("正在批量索引会话...")
         
         count = service.batch_index(limit=100)
         
-        wire_send(TextPart(text=f"✅ 已索引 {count} 个会话"))
+        _send_message(f"已索引 {count} 个会话")
         
     finally:
         service.close()
@@ -198,24 +195,22 @@ async def _cmd_index_all():
 
 async def _cmd_import(soul, dry_run: bool):
     """导入历史会话命令"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
     from kimi_cli.memory.utils.importer import SessionImporter
     
     service = MemoryService()
     if not service.initialize():
-        wire_send(TextPart(text="⚠️ 请先运行 /memory init"))
+        _send_message("请先运行 /memory init")
         return
     
     try:
-        wire_send(TextPart(text="🔄 正在导入历史会话..."))
+        _send_message("正在导入历史会话...")
         
         importer = SessionImporter(service)
         stats = importer.import_all(dry_run=dry_run)
         
         # 显示报告
         report = importer.generate_report()
-        wire_send(TextPart(text=report))
+        _send_message(report)
         
     finally:
         service.close()
@@ -223,28 +218,26 @@ async def _cmd_import(soul, dry_run: bool):
 
 async def _cmd_eval(soul):
     """评估召回效果命令"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
     from kimi_cli.memory.utils.evaluator import RecallEvaluator
     from pathlib import Path
     
     service = MemoryService()
     if not service.initialize():
-        wire_send(TextPart(text="⚠️ 请先运行 /memory init"))
+        _send_message("请先运行 /memory init")
         return
     
     try:
-        wire_send(TextPart(text="🧪 正在运行召回效果评估..."))
+        _send_message("正在运行召回效果评估...")
         
         evaluator = RecallEvaluator(service)
         
         # 自动生成测试用例
-        wire_send(TextPart(text="📋 从现有会话生成测试用例..."))
+        _send_message("从现有会话生成测试用例...")
         test_cases = evaluator.auto_generate_tests(num_tests=10)
-        wire_send(TextPart(text=f"✅ 生成了 {len(test_cases)} 个测试用例"))
+        _send_message(f"生成了 {len(test_cases)} 个测试用例")
         
         # 运行评估
-        wire_send(TextPart(text="🔍 执行召回测试..."))
+        _send_message("执行召回测试...")
         report = evaluator.run_evaluation(top_k=5)
         
         # 保存报告
@@ -253,7 +246,7 @@ async def _cmd_eval(soul):
         
         # 显示结果摘要
         summary = f"""
-📊 评估结果摘要
+评估结果摘要
 
 总体指标:
   Top-1 准确率: {report.top1_accuracy:.2%}
@@ -265,9 +258,9 @@ async def _cmd_eval(soul):
   JSON: {json_path}
   Markdown: {md_path}
 
-💡 使用 `/recall` 体验记忆召回功能
+使用 `/recall` 体验记忆召回功能
 """
-        wire_send(TextPart(text=summary))
+        _send_message(summary)
         
     finally:
         service.close()
@@ -275,47 +268,44 @@ async def _cmd_eval(soul):
 
 async def _cmd_config(edit_mode: bool):
     """配置命令"""
-    from kimi_cli.soul import wire_send
-    from kimi_cli.wire.types import TextPart
-    
     config_path = Path.home() / ".kimi" / "memory" / "config.json"
     
     if edit_mode:
-        wire_send(TextPart(text=f"""
-📝 编辑配置文件
+        _send_message(f"""
+编辑配置文件
 
 路径: {config_path}
 
-请使用编辑器修改后保存，然后重启 Kimi。
+请使用编辑器修改后保存, 然后重启 Kimi.
 
 常用配置项:
 - storage.db_path: 数据库路径
 - embedding.provider: embedding 提供者 (local_onnx/mock)
 - recall.auto_recall_enabled: 自动召回开关
 - recall.max_results: 最大召回数量
-"""))
+""")
         return
     
     # 显示配置
     if not config_path.exists():
-        wire_send(TextPart(text="⚠️ 配置文件不存在，请先运行 /memory init"))
+        _send_message("配置文件不存在, 请先运行 /memory init")
         return
     
     try:
         with open(config_path, 'r') as f:
             content = f.read()
         
-        wire_send(TextPart(text=f"""
-📄 当前配置 ({config_path}):
+        _send_message(f"""
+当前配置 ({config_path}):
 
 ```json
 {content}
 ```
 
 使用 `/memory config --edit` 查看编辑说明
-"""))
+""")
     except Exception as e:
-        wire_send(TextPart(text=f"❌ 读取配置失败: {e}"))
+        _send_message(f"读取配置失败: {e}")
 
 
 __all__ = ["memory_command"]

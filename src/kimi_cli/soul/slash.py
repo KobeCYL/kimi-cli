@@ -118,15 +118,21 @@ async def recall(soul: KimiSoul, args: str):
     await recall_command(soul, args)
 
 
+def _send_safe(text: str) -> None:
+    """安全发送消息, 支持 wire_send 降级到 print"""
+    try:
+        wire_send(TextPart(text=text))
+    except Exception:
+        print(text)
+
+
 @registry.command
 async def session(soul: KimiSoul, args: str):
     """View a specific session by ID"""
-    from kimi_cli.wire.types import TextPart
-    
     session_id = args.strip()
     if not session_id:
-        wire_send(TextPart(text="""
-📋 Session Viewer
+        _send_safe("""
+Session Viewer
 
 用法:
   /session <session_id>     - 查看指定会话的完整内容
@@ -137,37 +143,37 @@ async def session(soul: KimiSoul, args: str):
 
 示例:
   /session abc123           - 查看 ID 为 abc123 的会话
-"""))
+""")
         return
     
     service = MemoryService()
     if not service.initialize():
-        wire_send(TextPart(text="❌ 记忆服务初始化失败"))
+        _send_safe("记忆服务初始化失败")
         return
     
     try:
         session = service.get_session(session_id)
         if not session:
-            wire_send(TextPart(text=f"❌ 未找到会话: {session_id}"))
+            _send_safe(f"未找到会话: {session_id}")
             return
         
         from datetime import datetime
         dt = datetime.fromtimestamp(session.updated_at)
         
         lines = [
-            f"📄 会话详情: {session.title}",
-            f"🆔 ID: {session.id}",
-            f"📅 更新: {dt.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"会话详情: {session.title}",
+            f"ID: {session.id}",
+            f"更新: {dt.strftime('%Y-%m-%d %H:%M:%S')}",
         ]
         
         if session.work_dir:
-            lines.append(f"📁 目录: {session.work_dir}")
+            lines.append(f"目录: {session.work_dir}")
         
         if session.keywords:
-            lines.append(f"🏷️ 关键词: {', '.join(session.keywords)}")
+            lines.append(f"关键词: {', '.join(session.keywords)}")
         
         if session.summary:
-            lines.append(f"📝 摘要: {session.summary}")
+            lines.append(f"摘要: {session.summary}")
         
         lines.append("")
         lines.append("=" * 50)
@@ -180,14 +186,14 @@ async def session(soul: KimiSoul, args: str):
         else:
             for msg in messages:
                 msg_dt = datetime.fromtimestamp(msg.timestamp)
-                role_icon = "👤" if msg.role == "user" else "🤖"
-                lines.append(f"{role_icon} [{msg_dt.strftime('%H:%M:%S')}] {msg.role.upper()}")
-                lines.append(f"   {msg.content}")
+                role_label = "用户" if msg.role == "user" else "AI"
+                lines.append(f"[{msg_dt.strftime('%H:%M:%S')}] {role_label}")
+                lines.append(f"  {msg.content}")
                 lines.append("")
         
         lines.append("=" * 50)
         
-        wire_send(TextPart(text="\n".join(lines)))
+        _send_safe("\n".join(lines))
         
     finally:
         service.close()
