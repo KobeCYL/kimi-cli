@@ -66,7 +66,9 @@ class SlashExtensionLoader:
         
         # 1. Project-local commands (highest priority)
         if work_dir is not None:
-            local_dir = Path(work_dir) / ".kimi" / "commands"
+            # Convert KaosPath or other path types to str first
+            work_dir_str = str(work_dir)
+            local_dir = Path(work_dir_str) / ".kimi" / "commands"
             if local_dir.exists():
                 dirs.append(local_dir)
         
