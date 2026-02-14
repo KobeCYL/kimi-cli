@@ -9,15 +9,17 @@ from kimi_cli.memory.models.data import MemoryConfig, StorageConfig
 
 
 @pytest.fixture
-def temp_db_path():
+def temp_db_path(tmp_path):
     """临时数据库路径"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir) / "test_memory.db"
+    yield tmp_path / "test_memory.db"
 
 
 @pytest.fixture
 def memory_service(temp_db_path):
     """Memory Service Fixture"""
+    # 禁用单例模式（测试用）
+    MemoryService._disable_singleton = True
+    
     config = MemoryConfig(
         storage=StorageConfig(
             backend="sqlite",
@@ -27,7 +29,11 @@ def memory_service(temp_db_path):
     service = MemoryService(config)
     service.initialize()
     yield service
+    # 确保正确关闭
     service.close()
+    # 给 SQLite 一点时间释放文件
+    import time
+    time.sleep(0.01)
 
 
 @pytest.fixture

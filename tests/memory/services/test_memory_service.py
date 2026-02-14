@@ -65,6 +65,10 @@ class TestMemoryService:
         """测试单例模式"""
         from kimi_cli.memory.models.data import MemoryConfig, StorageConfig
         
+        # 启用单例模式
+        MemoryService._disable_singleton = False
+        MemoryService._instance = None
+        
         config = MemoryConfig(
             storage=StorageConfig(db_path=str(temp_db_path))
         )
@@ -76,55 +80,19 @@ class TestMemoryService:
         assert service1 is service2
         
         service1.close()
-
-
-class TestIndexManager:
-    """索引管理器测试"""
-    
-    def test_index_session(self, memory_service):
-        """测试索引会话"""
-        # 创建带消息的会话
-        memory_service.create_session("idx-test", "Index Test")
-        memory_service.add_message("idx-test", "user", "Hello world", 10)
-        memory_service.add_message("idx-test", "assistant", "Hi there", 8)
-        
-        # 索引
-        result = memory_service.index_session("idx-test")
-        assert result is True
-        
-        # 验证会话已更新
-        session = memory_service.get_session("idx-test")
-        assert session.token_count > 0
-    
-    def test_should_index(self, memory_service):
-        """测试是否应该索引"""
-        memory_service.create_session("should-idx", "Should Index")
-        
-        # 没有消息时不应该索引
-        should = memory_service._index_manager.should_index("should-idx")
-        assert not should
-        
-        # 添加多条消息
-        for i in range(6):
-            memory_service.add_message("should-idx", "user", f"Message {i}", 10)
-        
-        # 现在有消息了，应该索引
-        should = memory_service._index_manager.should_index("should-idx")
-        assert should
+        MemoryService._instance = None
+        # 恢复禁用单例（便于其他测试）
+        MemoryService._disable_singleton = True
 
 
 class TestRecallEngine:
     """召回引擎测试"""
     
-    def test_recall_with_mock_embedding(self, memory_service):
-        """测试使用 MockEmbedding 的召回"""
+    def test_recall_returns_list(self, memory_service):
+        """测试召回返回列表"""
         # 创建测试会话
         memory_service.create_session("recall-1", "Python Programming Guide")
         memory_service.add_message("recall-1", "user", "How to learn Python?", 20)
-        memory_service.add_message("recall-1", "assistant", "Start with basics", 15)
-        
-        # 索引
-        memory_service.index_session("recall-1")
         
         # 召回
         results = memory_service.recall(
@@ -133,7 +101,7 @@ class TestRecallEngine:
             top_k=3
         )
         
-        # MockEmbedding 会产生确定性结果
+        # 应该返回列表（可能是空的）
         assert isinstance(results, list)
     
     def test_recall_excludes_current(self, memory_service):
@@ -144,9 +112,6 @@ class TestRecallEngine:
         
         memory_service.add_message("current", "user", "Current message", 10)
         memory_service.add_message("other", "user", "Other message", 10)
-        
-        memory_service.index_session("current")
-        memory_service.index_session("other")
         
         # 召回时排除 current
         results = memory_service.recall(

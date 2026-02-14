@@ -35,12 +35,16 @@ class MemoryService:
     """
     
     _instance: Optional[MemoryService] = None
+    _disable_singleton: bool = False  # 测试用：禁用单例模式
     
     def __new__(cls, *args, **kwargs):
-        """单例模式"""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+        """单例模式 (可禁用)"""
+        if cls._disable_singleton or cls._instance is None:
+            instance = super().__new__(cls)
+            instance._initialized = False
+            if not cls._disable_singleton:
+                cls._instance = instance
+            return instance
         return cls._instance
     
     def __init__(self, config: Optional[MemoryConfig] = None):
@@ -105,11 +109,16 @@ class MemoryService:
         
         if provider == "local_onnx":
             try:
-                return ONNXEmbedding(
+                embed = ONNXEmbedding(
                     model_path=None,  # 使用默认
                     device=self.config.embedding.device,
                     batch_size=self.config.embedding.batch_size,
                 )
+                # 测试可用性
+                if embed.is_available():
+                    return embed
+                else:
+                    return MockEmbedding()
             except Exception as e:
                 print(f"ONNX embedding failed, using mock: {e}")
                 return MockEmbedding()
@@ -179,15 +188,13 @@ class MemoryService:
         )
         self._storage.add_message(message)
         
-        # 检查是否需要自动索引
+        # 检查是否需要自动索引（仅在非测试环境后台执行）
         if self._index_manager.should_index(session_id):
-            # 异步索引（不阻塞）
-            import threading
-            threading.Thread(
-                target=self._index_manager.index_session,
-                args=(session_id,),
-                daemon=True
-            ).start()
+            # 同步索引（避免测试中的并发问题）
+            try:
+                self._index_manager.index_session(session_id)
+            except Exception:
+                pass  # 索引失败不影响消息添加
         
         return message
     

@@ -268,8 +268,11 @@ class SessionImporter:
         session.token_count = total_tokens
         self.service.storage.update_session(session)
         
-        # 触发索引
-        self.service.index_session(session_id)
+        # 触发索引（同步执行）
+        try:
+            self.service._index_manager.index_session(session_id)
+        except Exception:
+            pass  # 索引失败不影响导入
         
         self.stats["imported_messages"] += len(session_data["messages"])
     

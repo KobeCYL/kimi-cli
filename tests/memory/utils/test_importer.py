@@ -17,6 +17,9 @@ class TestSessionImporter:
     def importer_service(self):
         """创建带 importer 的 service"""
         with tempfile.TemporaryDirectory() as tmpdir:
+            # 禁用单例模式
+            MemoryService._disable_singleton = True
+            
             config = MemoryConfig(
                 storage=StorageConfig(
                     backend="sqlite",
@@ -31,7 +34,8 @@ class TestSessionImporter:
             yield service, importer
             
             service.close()
-            MemoryService._instance = None
+            import time
+            time.sleep(0.01)
     
     @pytest.fixture
     def mock_kimi_sessions(self):
