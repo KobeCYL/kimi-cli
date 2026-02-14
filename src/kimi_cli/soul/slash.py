@@ -203,3 +203,249 @@ Session Viewer
         
     finally:
         service.close()
+
+
+# ========== 智能模型路由系统 ==========
+
+# 模型配置
+MODELS = {
+    "fast": {
+        "name": "kimi-code/kimi-for-coding",
+        "description": "快速响应模型 - 适合简单问答、代码补全、日常对话",
+        "strengths": ["快速", "代码", "日常对话", "长上下文"],
+        "cost_level": "低",
+        "max_context": 262144,
+        "speed": "快",
+    },
+    "balanced": {
+        "name": "deepseek",
+        "description": "平衡模型 - 适合中等复杂度任务、推理、代码审查",
+        "strengths": ["推理", "分析", "代码审查", "数学"],
+        "cost_level": "中",
+        "max_context": 64000,
+        "speed": "中等",
+    },
+    "powerful": {
+        "name": "deepseek",
+        "description": "强力模型 - 适合复杂任务、深度分析",
+        "strengths": ["复杂推理", "深度分析", "问题解决"],
+        "cost_level": "中",
+        "max_context": 64000,
+        "speed": "中等",
+    },
+}
+
+
+def _analyze_conversation_for_routing(soul: KimiSoul) -> dict:
+    """分析对话特征用于模型路由"""
+    analysis = {
+        "message_count": 0,
+        "total_chars": 0,
+        "code_blocks": 0,
+        "complexity_score": 0,
+        "token_count": 0,
+        "complexity_indicators": [],
+        "is_simple_chat": False,
+    }
+    
+    try:
+        ctx = soul.context
+        history = list(ctx.history)
+        
+        analysis["message_count"] = len(history)
+        analysis["token_count"] = ctx.token_count
+        
+        # 分析最近 10 条消息
+        recent_messages = history[-10:] if len(history) > 10 else history
+        
+        # 关键词定义
+        complexity_keywords = [
+            ('架构', 2), ('设计模式', 2), ('重构', 2), ('优化', 2), ('性能调优', 2),
+            ('算法', 2), ('数据结构', 2), ('微服务', 2), ('分布式', 2), ('并发', 2),
+            ('多线程', 2), ('K8s', 2), ('Docker', 2), ('Kubernetes', 2),
+            ('debug', 2), ('调试', 2), ('排查', 2), ('定位', 2), ('内存泄漏', 2),
+            ('深度学习', 2), ('机器学习', 2), ('AI', 1), ('模型训练', 2),
+            ('安全', 2), ('加密', 2), ('漏洞', 2), ('攻击', 2),
+            ('architecture', 2), ('design pattern', 2), ('refactor', 2), ('optimize', 2),
+            ('performance', 2), ('algorithm', 2), ('concurrent', 2), ('distributed', 2),
+        ]
+        
+        simple_patterns = [
+            r'^(你好|您好|hello|hi|hey)\s*$',
+            r'^(谢谢|感谢|thanks|thank you)\s*$',
+            r'^(再见|拜拜|bye|goodbye)\s*$',
+        ]
+        
+        content_text = ""
+        for msg in recent_messages:
+            content = str(msg.content) if hasattr(msg, 'content') else ""
+            content_text += content + " "
+            analysis["total_chars"] += len(content)
+            
+            # 代码块统计
+            import re
+            analysis["code_blocks"] += len(re.findall(r'```[\s\S]*?```', content))
+            
+            # 复杂度评分
+            content_lower = content.lower()
+            for keyword, score in complexity_keywords:
+                if keyword.lower() in content_lower:
+                    analysis["complexity_score"] += score
+                    if keyword not in analysis["complexity_indicators"]:
+                        analysis["complexity_indicators"].append(keyword)
+            
+            # 简单对话检测
+            for pattern in simple_patterns:
+                if re.search(pattern, content, re.IGNORECASE):
+                    analysis["is_simple_chat"] = True
+                    
+    except Exception as e:
+        logger.debug(f"对话分析异常: {e}")
+    
+    return analysis
+
+
+def _recommend_model(analysis: dict) -> tuple[str, str, dict]:
+    """根据分析结果推荐模型
+    
+    Returns:
+        (模型key, 推荐原因, 完整推荐信息)
+    """
+    score = analysis["complexity_score"]
+    code_blocks = analysis["code_blocks"]
+    token_count = analysis["token_count"]
+    is_simple = analysis["is_simple_chat"]
+    
+    # 决策逻辑
+    if is_simple and token_count < 5000 and score == 0:
+        return "fast", "简单对话，快速响应即可", {
+            "action": "保持当前模型或切换到 kimi-for-coding",
+            "confidence": "high"
+        }
+    
+    if score >= 6 or code_blocks >= 3 or token_count > 40000:
+        return "powerful", "复杂任务需要深度推理能力", {
+            "action": "建议切换到 deepseek 模型",
+            "confidence": "high"
+        }
+    
+    if score >= 3 or code_blocks >= 2 or token_count > 15000:
+        return "balanced", "中等复杂度任务", {
+            "action": "建议使用 deepseek 模型",
+            "confidence": "medium"
+        }
+    
+    # 默认情况
+    if token_count < 8000 and score < 2:
+        return "fast", "常规任务，当前模型可满足", {
+            "action": "保持当前模型",
+            "confidence": "medium"
+        }
+    
+    return "balanced", "建议使用平衡模型以获得更好效果", {
+        "action": "建议使用 deepseek 模型",
+        "confidence": "low"
+    }
+
+
+@registry.command
+async def smart_model(soul: KimiSoul, args: str):
+    """智能分析对话并推荐最优模型
+    
+    用法:
+    /smart_model           - 分析当前对话并给出模型建议
+    /smart_model --switch  - 分析并自动切换到推荐模型
+    """
+    args = args.strip()
+    auto_switch = "--switch" in args
+    
+    _send_safe("🧠 正在分析对话特征...")
+    
+    analysis = _analyze_conversation_for_routing(soul)
+    model_key, reason, info = _recommend_model(analysis)
+    recommended = MODELS[model_key]
+    
+    # 构建报告
+    lines = [
+        "",
+        "📊 【对话分析报告】",
+        f"  消息数量: {analysis['message_count']} 条",
+        f"  Token 使用: {analysis['token_count']:,}",
+        f"  代码块数: {analysis['code_blocks']}",
+        f"  复杂度评分: {analysis['complexity_score']}",
+    ]
+    
+    if analysis["complexity_indicators"]:
+        lines.append(f"  复杂度指标: {', '.join(analysis['complexity_indicators'][:5])}")
+    
+    lines.extend([
+        "",
+        f"🎯 【推荐: {model_key.upper()}】",
+        f"  模型: {recommended['name']}",
+        f"  原因: {reason}",
+        f"  描述: {recommended['description']}",
+        f"  优势: {', '.join(recommended['strengths'][:3])}",
+        f"  成本: {recommended['cost_level']} | 速度: {recommended['speed']}",
+        f"  建议操作: {info['action']}",
+    ])
+    
+    _send_safe("\n".join(lines))
+    
+    # 自动切换
+    if auto_switch:
+        # 注意：实际切换模型需要调用配置系统，这里先给出提示
+        _send_safe(f"\n💡 使用 `/model {recommended['name']}` 切换到推荐模型")
+
+
+@registry.command(aliases=["route"])
+async def model_route(soul: KimiSoul, args: str):
+    """快速路由到推荐模型
+    
+    用法:
+    /route              - 分析并显示推荐模型
+    /route fast         - 切换到快速模型
+    /route balanced     - 切换到平衡模型
+    /route powerful     - 切换到强力模型
+    """
+    args = args.strip().lower()
+    
+    # 如果指定了具体模型级别，直接显示信息
+    if args in MODELS:
+        model = MODELS[args]
+        lines = [
+            f"",
+            f"🎯 【{args.upper()} 模型】",
+            f"  名称: {model['name']}",
+            f"  描述: {model['description']}",
+            f"  优势: {', '.join(model['strengths'])}",
+            f"  成本: {model['cost_level']} | 速度: {model['speed']}",
+            f"  最大上下文: {model['max_context']:,} tokens",
+            f"",
+            f"💡 使用 `/model {model['name']}` 切换到此模型",
+        ]
+        _send_safe("\n".join(lines))
+        return
+    
+    # 否则进行分析
+    _send_safe("🔍 正在分析当前对话...")
+    
+    analysis = _analyze_conversation_for_routing(soul)
+    model_key, reason, info = _recommend_model(analysis)
+    recommended = MODELS[model_key]
+    
+    lines = [
+        "",
+        f"🎯 【推荐模型: {model_key.upper()}】",
+        f"  模型: {recommended['name']}",
+        f"  原因: {reason}",
+        f"  描述: {recommended['description']}",
+        f"  优势: {', '.join(recommended['strengths'][:3])}",
+        f"  成本: {recommended['cost_level']} | 速度: {recommended['speed']}",
+        f"",
+        f"📊 对话特征:",
+        f"  复杂度评分: {analysis['complexity_score']} | 代码块: {analysis['code_blocks']} | Token: {analysis['token_count']:,}",
+        f"",
+        f"💡 使用 `/model {recommended['name']}` 切换",
+    ]
+    
+    _send_safe("\n".join(lines))

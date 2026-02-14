@@ -148,6 +148,48 @@ After `/recall` shows results, use `/recall-apply` to select which memories to a
 
 The memory system automatically filters out content already present in the current context to avoid duplication.
 
+### Smart Model Routing
+
+Kimi Code CLI provides intelligent model routing to automatically recommend the optimal model based on conversation complexity.
+
+**Analyze and Recommend**
+
+```bash
+# Analyze current conversation and recommend model
+/smart_model
+
+# Analyze and show switch command
+/smart_model --switch
+```
+
+**Quick Route**
+
+```bash
+# Show recommended model based on current context
+/route
+
+# View specific model info
+/route fast
+/route balanced
+/route powerful
+```
+
+**Model Levels**
+
+| Level | Model | Best For | Speed | Cost |
+|-------|-------|----------|-------|------|
+| fast | kimi-for-coding | Simple Q&A, code completion, daily chat | Fast | Low |
+| balanced | deepseek | Medium complexity, reasoning, code review | Medium | Medium |
+| powerful | deepseek | Complex tasks, deep analysis | Medium | Medium |
+
+**Auto-Detection Features**
+
+The routing system automatically detects:
+- **Code blocks**: 2+ code blocks → balanced/powerful
+- **Complexity keywords**: architecture, algorithm, distributed, debug, etc.
+- **Token usage**: >40k tokens → powerful, >15k → balanced
+- **Simple chat**: greetings, thanks → fast
+
 ### MCP support
 
 Kimi Code CLI supports MCP (Model Context Protocol) tools.
