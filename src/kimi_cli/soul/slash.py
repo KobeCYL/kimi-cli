@@ -98,3 +98,20 @@ async def yolo(soul: KimiSoul, args: str):
     else:
         soul.runtime.approval.set_yolo(True)
         wire_send(TextPart(text="You only live once! All actions will be auto-approved."))
+
+
+# Import and register memory system commands
+from kimi_cli.memory.commands.memory_cmd import memory_command
+from kimi_cli.memory.commands.recall_cmd import recall_command
+
+
+@registry.command
+async def memory(soul: KimiSoul, args: str):
+    """Memory system management commands"""
+    await memory_command(soul, args)
+
+
+@registry.command
+async def recall(soul: KimiSoul, args: str):
+    """Recall relevant historical conversations"""
+    await recall_command(soul, args)
