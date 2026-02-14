@@ -79,6 +79,75 @@ plugins=(... kimi-cli)
 
 After restarting Zsh, you can switch to agent mode by pressing `Ctrl-X`.
 
+### Memory System (Recall)
+
+Kimi Code CLI has a built-in memory system that automatically saves your conversation history and allows you to recall relevant context from previous sessions.
+
+**Initialize Memory System**
+
+```bash
+# Inside Kimi CLI
+/memory init
+```
+
+This will:
+- Initialize the memory database at `~/.kimi/memory/`
+- Import current session history
+- Import all historical sessions from `~/.kimi/sessions/`
+
+**Recall Usage**
+
+```bash
+# Manual recall with keywords
+/recall "Kimi CLI architecture"
+
+# Recall based on recent context
+/recall
+
+# List recent sessions
+/recall --list
+
+# View recall statistics
+/recall --stats
+```
+
+**Auto-Recall Modes**
+
+```bash
+# Check current mode
+/recall --mode
+
+# Manual mode (default) - only search when explicitly using /recall
+/recall --mode manual
+
+# Auto mode - automatically prompt when vague references detected
+/recall --mode auto
+
+# Inject mode - automatically add relevant memory to context
+/recall --mode inject
+```
+
+**Temporary Trigger**
+
+Use `#recall` prefix in your message to temporarily trigger recall without changing global settings:
+
+```
+#recall How to fix that bug?
+#recall: What was the architecture we discussed earlier?
+```
+
+**Select and Apply Recall Results**
+
+After `/recall` shows results, use `/recall-apply` to select which memories to add to context:
+
+```bash
+/recall-apply 1,3      # Select items 1 and 3
+/recall-apply 1-3      # Select items 1 through 3
+/recall-apply all      # Select all results
+```
+
+The memory system automatically filters out content already present in the current context to avoid duplication.
+
 ### MCP support
 
 Kimi Code CLI supports MCP (Model Context Protocol) tools.
