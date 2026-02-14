@@ -174,13 +174,6 @@ async def model(app: Shell, args: str):
         console.print('[yellow]No models configured, send "/login" to login.[/yellow]')
         return
 
-    if not config.is_from_default_location:
-        console.print(
-            "[yellow]Model switching requires the default config file; "
-            "restart without --config/--config-file.[/yellow]"
-        )
-        return
-
     # Find current model/thinking from runtime (may be overridden by --model/--thinking)
     curr_model_cfg = soul.runtime.llm.model_config if soul.runtime.llm else None
     curr_model_name: str | None = None
@@ -256,28 +249,30 @@ async def model(app: Shell, args: str):
         )
         return
 
-    # Save and reload
-    prev_model = config.default_model
-    prev_thinking = config.default_thinking
-    config.default_model = selected_model_name
-    config.default_thinking = new_thinking
+    # Dynamically switch model without restarting session
     try:
-        config_for_save = load_config()
-        config_for_save.default_model = selected_model_name
-        config_for_save.default_thinking = new_thinking
-        save_config(config_for_save)
-    except (ConfigError, OSError) as exc:
-        config.default_model = prev_model
-        config.default_thinking = prev_thinking
-        console.print(f"[red]Failed to save config: {exc}[/red]")
+        soul.switch_model(selected_model_name, thinking=new_thinking)
+    except (ValueError, RuntimeError) as exc:
+        console.print(f"[red]Failed to switch model: {exc}[/red]")
         return
+
+    # Save config to persist the choice (if using default config location)
+    if config.is_from_default_location:
+        try:
+            config_for_save = load_config()
+            config_for_save.default_model = selected_model_name
+            config_for_save.default_thinking = new_thinking
+            save_config(config_for_save)
+        except (ConfigError, OSError) as exc:
+            # Non-fatal: the model is already switched, just warn about config not saved
+            console.print(
+                f"[yellow]Model switched but failed to save config: {exc}[/yellow]"
+            )
 
     console.print(
         f"[green]Switched to {selected_model_name} "
-        f"with thinking {'on' if new_thinking else 'off'}. "
-        "Reloading...[/green]"
+        f"with thinking {'on' if new_thinking else 'off'}.[/green]"
     )
-    raise Reload(session_id=soul.runtime.session.id)
 
 
 @registry.command(aliases=["release-notes"])
