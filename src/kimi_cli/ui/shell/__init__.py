@@ -93,6 +93,8 @@ class Shell:
                 wire_file=self.soul.wire_file,
             )
 
+        from kimi_cli.soul.slash_ext import SlashExtensionLoader
+        
         with CustomPromptSession(
             status_provider=lambda: self.soul.status,
             model_capabilities=self.soul.model_capabilities or set(),
