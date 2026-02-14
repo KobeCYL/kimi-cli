@@ -18,6 +18,9 @@ async def memory_command(soul, args: str):
     /memory status              - 显示状态
     /memory index               - 索引当前会话
     /memory index-all           - 批量索引所有会话
+    /memory import              - 导入 Kimi 历史会话
+    /memory import --dry-run    - 试运行导入
+    /memory eval                - 评估召回效果
     /memory config              - 显示配置
     /memory config --edit       - 编辑配置
     """
@@ -36,6 +39,11 @@ async def memory_command(soul, args: str):
         await _cmd_index(soul)
     elif subcmd == "index-all":
         await _cmd_index_all()
+    elif subcmd == "import":
+        dry_run = "--dry-run" in parts or "-n" in parts
+        await _cmd_import(soul, dry_run)
+    elif subcmd == "eval":
+        await _cmd_eval(soul)
     elif subcmd == "config":
         edit_mode = "--edit" in parts
         await _cmd_config(edit_mode)
@@ -183,6 +191,83 @@ async def _cmd_index_all():
         count = service.batch_index(limit=100)
         
         wire_send(TextPart(text=f"✅ 已索引 {count} 个会话"))
+        
+    finally:
+        service.close()
+
+
+async def _cmd_import(soul, dry_run: bool):
+    """导入历史会话命令"""
+    from kimi_cli.soul import wire_send
+    from kimi_cli.wire.types import TextPart
+    from kimi_cli.memory.utils.importer import SessionImporter
+    
+    service = MemoryService()
+    if not service.initialize():
+        wire_send(TextPart(text="⚠️ 请先运行 /memory init"))
+        return
+    
+    try:
+        wire_send(TextPart(text="🔄 正在导入历史会话..."))
+        
+        importer = SessionImporter(service)
+        stats = importer.import_all(dry_run=dry_run)
+        
+        # 显示报告
+        report = importer.generate_report()
+        wire_send(TextPart(text=report))
+        
+    finally:
+        service.close()
+
+
+async def _cmd_eval(soul):
+    """评估召回效果命令"""
+    from kimi_cli.soul import wire_send
+    from kimi_cli.wire.types import TextPart
+    from kimi_cli.memory.utils.evaluator import RecallEvaluator
+    from pathlib import Path
+    
+    service = MemoryService()
+    if not service.initialize():
+        wire_send(TextPart(text="⚠️ 请先运行 /memory init"))
+        return
+    
+    try:
+        wire_send(TextPart(text="🧪 正在运行召回效果评估..."))
+        
+        evaluator = RecallEvaluator(service)
+        
+        # 自动生成测试用例
+        wire_send(TextPart(text="📋 从现有会话生成测试用例..."))
+        test_cases = evaluator.auto_generate_tests(num_tests=10)
+        wire_send(TextPart(text=f"✅ 生成了 {len(test_cases)} 个测试用例"))
+        
+        # 运行评估
+        wire_send(TextPart(text="🔍 执行召回测试..."))
+        report = evaluator.run_evaluation(top_k=5)
+        
+        # 保存报告
+        output_dir = Path.home() / ".kimi" / "memory" / "evaluations"
+        json_path, md_path = evaluator.save_report(report, str(output_dir))
+        
+        # 显示结果摘要
+        summary = f"""
+📊 评估结果摘要
+
+总体指标:
+  Top-1 准确率: {report.top1_accuracy:.2%}
+  Top-3 准确率: {report.top3_accuracy:.2%}
+  Top-5 准确率: {report.top5_accuracy:.2%}
+  平均 MRR: {report.mean_mrr:.4f}
+
+详细报告已保存:
+  JSON: {json_path}
+  Markdown: {md_path}
+
+💡 使用 `/recall` 体验记忆召回功能
+"""
+        wire_send(TextPart(text=summary))
         
     finally:
         service.close()
