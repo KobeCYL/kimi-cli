@@ -156,15 +156,17 @@ class StorageBackend(ABC):
                         results[session_id].vector_score, score
                     )
         
-        # 计算综合分数
+        # 计算综合分数 (使用动态权重)
         final_results = list(results.values())
         for result in final_results:
-            # 加权平均
+            # 归一化分数 (确保最大值接近1.0)
+            vector_score = min(result.vector_score, 1.0)
+            keyword_score = min(result.keyword_score, 1.0)
+            
+            # 加权平均 (使用查询指定的权重)
             result.combined_score = (
-                query.time_decay_factor * 0  # TODO: 时间衰减
-                + (1 - query.time_decay_factor) * (
-                    result.vector_score * 0.6 + result.keyword_score * 0.4
-                )
+                vector_score * query.vector_weight + 
+                keyword_score * query.keyword_weight
             )
         
         # 排序并截断

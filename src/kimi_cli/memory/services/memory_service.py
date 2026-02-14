@@ -205,12 +205,16 @@ class MemoryService:
         context_text: str,
         current_session_id: Optional[str] = None,
         top_k: int = 5,
+        vector_weight: float = 0.6,
+        keyword_weight: float = 0.4,
     ) -> List[RecallResult]:
         """召回相关记忆"""
         return self._recall_engine.recall_for_session(
             session_id=current_session_id or "",
             context_text=context_text,
             top_k=top_k,
+            vector_weight=vector_weight,
+            keyword_weight=keyword_weight,
         )
     
     def get_recall_context(

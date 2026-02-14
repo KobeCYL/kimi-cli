@@ -76,6 +76,9 @@ class SearchQuery:
     top_k: int = 5
     min_score: float = 0.75
     time_decay_factor: float = 0.001
+    # 混合检索权重
+    vector_weight: float = 0.6
+    keyword_weight: float = 0.4
 
 
 @dataclass

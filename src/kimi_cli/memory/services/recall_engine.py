@@ -36,6 +36,8 @@ class RecallEngine:
         current_session_id: Optional[str] = None,
         top_k: int = 5,
         min_score: float = 0.75,
+        vector_weight: float = 0.6,
+        keyword_weight: float = 0.4,
     ) -> List[RecallResult]:
         """执行召回
         
@@ -60,6 +62,8 @@ class RecallEngine:
             session_id_to_exclude=current_session_id,
             top_k=top_k * 2,  # 多取一些用于过滤
             min_score=min_score,
+            vector_weight=vector_weight,
+            keyword_weight=keyword_weight,
         )
         
         # 执行混合搜索
@@ -81,6 +85,8 @@ class RecallEngine:
         session_id: str,
         context_text: str,
         top_k: int = 5,
+        vector_weight: float = 0.6,
+        keyword_weight: float = 0.4,
     ) -> List[RecallResult]:
         """为指定会话召回相关历史
         
@@ -96,6 +102,8 @@ class RecallEngine:
             query_embedding=embedding,
             current_session_id=session_id,
             top_k=top_k,
+            vector_weight=vector_weight,
+            keyword_weight=keyword_weight,
         )
     
     def _apply_time_decay(self, results: List[RecallResult]) -> List[RecallResult]:

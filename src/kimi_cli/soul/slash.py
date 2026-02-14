@@ -103,6 +103,7 @@ async def yolo(soul: KimiSoul, args: str):
 # Import and register memory system commands
 from kimi_cli.memory.commands.memory_cmd import memory_command
 from kimi_cli.memory.commands.recall_cmd import recall_command
+from kimi_cli.memory.services.memory_service import MemoryService
 
 
 @registry.command
@@ -115,3 +116,78 @@ async def memory(soul: KimiSoul, args: str):
 async def recall(soul: KimiSoul, args: str):
     """Recall relevant historical conversations"""
     await recall_command(soul, args)
+
+
+@registry.command
+async def session(soul: KimiSoul, args: str):
+    """View a specific session by ID"""
+    from kimi_cli.wire.types import TextPart
+    
+    session_id = args.strip()
+    if not session_id:
+        wire_send(TextPart(text="""
+📋 Session Viewer
+
+用法:
+  /session <session_id>     - 查看指定会话的完整内容
+  
+获取 session_id:
+  1. 使用 /recall 查看搜索结果中的 ID
+  2. 使用 /recall --list 查看最近会话
+
+示例:
+  /session abc123           - 查看 ID 为 abc123 的会话
+"""))
+        return
+    
+    service = MemoryService()
+    if not service.initialize():
+        wire_send(TextPart(text="❌ 记忆服务初始化失败"))
+        return
+    
+    try:
+        session = service.get_session(session_id)
+        if not session:
+            wire_send(TextPart(text=f"❌ 未找到会话: {session_id}"))
+            return
+        
+        from datetime import datetime
+        dt = datetime.fromtimestamp(session.updated_at)
+        
+        lines = [
+            f"📄 会话详情: {session.title}",
+            f"🆔 ID: {session.id}",
+            f"📅 更新: {dt.strftime('%Y-%m-%d %H:%M:%S')}",
+        ]
+        
+        if session.work_dir:
+            lines.append(f"📁 目录: {session.work_dir}")
+        
+        if session.keywords:
+            lines.append(f"🏷️ 关键词: {', '.join(session.keywords)}")
+        
+        if session.summary:
+            lines.append(f"📝 摘要: {session.summary}")
+        
+        lines.append("")
+        lines.append("=" * 50)
+        lines.append("")
+        
+        # 获取消息
+        messages = service.storage.get_recent_messages(session_id, limit=100)
+        if not messages:
+            lines.append("(无消息)")
+        else:
+            for msg in messages:
+                msg_dt = datetime.fromtimestamp(msg.timestamp)
+                role_icon = "👤" if msg.role == "user" else "🤖"
+                lines.append(f"{role_icon} [{msg_dt.strftime('%H:%M:%S')}] {msg.role.upper()}")
+                lines.append(f"   {msg.content}")
+                lines.append("")
+        
+        lines.append("=" * 50)
+        
+        wire_send(TextPart(text="\n".join(lines)))
+        
+    finally:
+        service.close()
