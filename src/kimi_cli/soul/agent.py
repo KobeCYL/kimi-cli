@@ -27,6 +27,23 @@ from kimi_cli.utils.environment import Environment
 from kimi_cli.utils.logging import logger
 from kimi_cli.utils.path import list_directory
 
+# Lazy import for memory service to avoid circular imports
+_memory_service_imported = False
+MemoryService: Any = None
+
+
+def _get_memory_service():
+    """Lazy import MemoryService to avoid circular imports."""
+    global _memory_service_imported, MemoryService
+    if not _memory_service_imported:
+        try:
+            from kimi_cli.memory.services.memory_service import MemoryService as MS
+            MemoryService = MS
+        except ImportError:
+            MemoryService = None
+        _memory_service_imported = True
+    return MemoryService
+
 if TYPE_CHECKING:
     from fastmcp.mcp_config import MCPConfig
 
@@ -74,6 +91,7 @@ class Runtime:
     labor_market: LaborMarket
     environment: Environment
     skills: dict[str, Skill]
+    memory_service: Any | None = None  # MemoryService instance for auto-save
 
     @staticmethod
     async def create(
@@ -104,6 +122,17 @@ class Runtime:
             for skill in skills
         )
 
+        # Initialize memory service if available
+        memory_service = None
+        try:
+            MS = _get_memory_service()
+            if MS is not None:
+                memory_service = MS()
+                if not memory_service.initialize():
+                    memory_service = None  # Memory not initialized yet, will be lazy-loaded
+        except Exception:
+            pass  # Memory service optional
+
         return Runtime(
             config=config,
             oauth=oauth,
@@ -121,6 +150,7 @@ class Runtime:
             labor_market=LaborMarket(),
             environment=environment,
             skills=skills_by_name,
+            memory_service=memory_service,
         )
 
     def copy_for_fixed_subagent(self) -> Runtime:
@@ -136,6 +166,7 @@ class Runtime:
             labor_market=LaborMarket(),  # fixed subagent has its own LaborMarket
             environment=self.environment,
             skills=self.skills,
+            memory_service=self.memory_service,  # share memory service
         )
 
     def copy_for_dynamic_subagent(self) -> Runtime:
@@ -151,6 +182,7 @@ class Runtime:
             labor_market=self.labor_market,  # dynamic subagent shares LaborMarket with main agent
             environment=self.environment,
             skills=self.skills,
+            memory_service=self.memory_service,  # share memory service
         )
 
 

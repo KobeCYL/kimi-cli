@@ -19,7 +19,7 @@ from kosong.chat_provider import (
 from kosong.message import Message
 from tenacity import RetryCallState, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
-from kimi_cli.llm import ModelCapability
+from kimi_cli.llm import LLM, ModelCapability, create_llm
 from kimi_cli.skill import Skill, read_skill_text
 from kimi_cli.skill.flow import Flow, FlowEdge, FlowNode, parse_choice
 from kimi_cli.soul import (
@@ -144,6 +144,74 @@ class KimiSoul:
             return thinking_effort != "off"
         return None
 
+    def switch_model(self, model_name: str, thinking: bool | None = None) -> LLM | None:
+        """Dynamically switch to a different model without restarting the session.
+        
+        Args:
+            model_name: The name of the model to switch to (must exist in config.models)
+            thinking: Whether to enable thinking mode. If None, uses the current thinking mode
+                     or the model's default based on its capabilities.
+        
+        Returns:
+            The new LLM instance if successful, None otherwise.
+            
+        Raises:
+            ValueError: If the model is not found in config or its provider is missing.
+        """
+        from kimi_cli.config import LLMModel
+        
+        config = self._runtime.config
+        
+        # Get the new model configuration
+        if model_name not in config.models:
+            raise ValueError(f"Model '{model_name}' not found in configuration")
+        
+        model_cfg = config.models[model_name]
+        provider = config.providers.get(model_cfg.provider)
+        if provider is None:
+            raise ValueError(f"Provider '{model_cfg.provider}' not found for model '{model_name}'")
+        
+        # Determine thinking mode
+        capabilities = self._runtime.llm.capabilities if self._runtime.llm else set()
+        
+        if thinking is None:
+            # Keep current thinking mode if possible
+            if self._runtime.llm:
+                current_thinking = self.thinking
+                if current_thinking is not None and "thinking" in capabilities:
+                    thinking = current_thinking
+                else:
+                    thinking = False
+            else:
+                thinking = False
+        
+        # Create new LLM instance
+        new_llm = create_llm(
+            provider=provider,
+            model=model_cfg,
+            thinking=thinking,
+            session_id=self._runtime.session.id,
+            oauth=self._runtime.oauth,
+        )
+        
+        if new_llm is None:
+            raise RuntimeError(f"Failed to create LLM instance for model '{model_name}'")
+        
+        # Update the runtime with the new LLM
+        self._runtime.llm = new_llm
+        
+        # Update default config to persist the choice
+        config.default_model = model_name
+        config.default_thinking = thinking
+        
+        logger.info(
+            "Switched to model: {model} (thinking: {thinking})",
+            model=model_name,
+            thinking=thinking,
+        )
+        
+        return new_llm
+
     @property
     def status(self) -> StatusSnapshot:
         return StatusSnapshot(
@@ -218,7 +286,94 @@ class KimiSoul:
         await self._checkpoint()  # this creates the checkpoint 0 on first run
         await self._context.append_message(user_message)
         logger.debug("Appended user message to context")
-        return await self._agent_loop()
+        
+        # Auto-save user message to memory system
+        self._auto_save_to_memory("user", user_message)
+        
+        # Auto-recall: detect vague references and suggest recall
+        await self._auto_recall_check(user_message)
+        
+        result = await self._agent_loop()
+        
+        # Auto-save assistant's final message to memory system
+        if result.final_message:
+            self._auto_save_to_memory("assistant", result.final_message)
+        
+        return result
+    
+    async def _auto_recall_check(self, user_message: Message) -> None:
+        """检测用户输入是否需要自动召回历史上下文"""
+        try:
+            # 检查记忆服务是否可用
+            memory_service = self._runtime.memory_service
+            if memory_service is None:
+                return
+            
+            # 提取文本内容
+            text = user_message.extract_text(" ") if hasattr(user_message, 'extract_text') else str(user_message.content)
+            if not text.strip():
+                return
+            
+            # 导入检测函数
+            from kimi_cli.memory.commands.recall_cmd import should_auto_recall
+            
+            # 检测是否包含模糊指代词汇
+            if should_auto_recall(text):
+                logger.debug("Auto-recall triggered for input: {text}", text=text[:100])
+                
+                # 触发自动召回
+                from kimi_cli.memory.commands.recall_cmd import recall_command
+                await recall_command(self, "--auto")
+                
+        except Exception:
+            # 自动召回不应该阻塞主流程
+            pass
+
+    def _auto_save_to_memory(self, role: str, message: Message) -> None:
+        """Automatically save message to memory system.
+        
+        This is a fire-and-forget operation that should not block the main flow.
+        """
+        try:
+            memory_service = self._runtime.memory_service
+            if memory_service is None:
+                return
+            
+            # Get session info
+            session_id = getattr(self._context, 'session_id', None)
+            if not session_id:
+                return
+            
+            # Extract text content
+            text = message.extract_text(" ") if hasattr(message, 'extract_text') else str(message.content)
+            if not text.strip():
+                return
+            
+            # Import here to avoid circular imports
+            from kimi_cli.memory.models.data import Session as MemorySession
+            
+            # Check if session exists in memory, create if not
+            existing_session = memory_service.get_session(session_id)
+            if existing_session is None:
+                # Create new session in memory
+                memory_session = MemorySession(
+                    id=session_id,
+                    title=text[:100] + "..." if len(text) > 100 else text,
+                    work_dir=str(self._runtime.session.work_dir) if self._runtime.session.work_dir else None,
+                )
+                memory_service.storage.create_session(memory_session)
+            
+            # Add message to memory
+            memory_service.add_message(
+                session_id=session_id,
+                role=role,
+                content=text,
+                token_count=getattr(message, 'token_count', 0) or 0,
+            )
+            
+        except Exception:
+            # Memory auto-save should never block main flow
+            pass
 
     def _build_slash_commands(self) -> list[SlashCommand[Any]]:
         from kimi_cli.soul.slash import list_commands as list_soul_slash_commands

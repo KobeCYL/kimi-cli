@@ -102,7 +102,7 @@ async def yolo(soul: KimiSoul, args: str):
 
 # Import and register memory system commands
 from kimi_cli.memory.commands.memory_cmd import memory_command
-from kimi_cli.memory.commands.recall_cmd import recall_command
+from kimi_cli.memory.commands.recall_cmd import recall_command, recall_apply_command
 from kimi_cli.memory.services.memory_service import MemoryService
 
 
@@ -116,6 +116,12 @@ async def memory(soul: KimiSoul, args: str):
 async def recall(soul: KimiSoul, args: str):
     """Recall relevant historical conversations"""
     await recall_command(soul, args)
+
+
+@registry.command(aliases=["recall-apply"])
+async def recall_apply(soul: KimiSoul, args: str):
+    """Apply selected recall results to context"""
+    await recall_apply_command(soul, args)
 
 
 def _send_safe(text: str) -> None:

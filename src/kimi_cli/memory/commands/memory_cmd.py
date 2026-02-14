@@ -41,7 +41,7 @@ async def memory_command(soul, args: str):
     subcmd = parts[0] if parts else "status"
     
     if subcmd == "init":
-        await _cmd_init()
+        await _cmd_init(soul)
     elif subcmd == "status":
         await _cmd_status()
     elif subcmd == "index":
@@ -73,7 +73,7 @@ async def memory_command(soul, args: str):
 """)
 
 
-async def _cmd_init():
+async def _cmd_init(soul):
     """初始化命令"""
     _send_message("正在初始化记忆系统...")
     
@@ -90,22 +90,147 @@ async def _cmd_init():
         
         # 初始化服务
         service = MemoryService(config)
-        if service.initialize():
-            _send_message(f"""
-记忆系统初始化成功!
-
-配置目录: {memory_dir}
-数据库: {config.storage.db_path}
-
-下次启动 Kimi 时会自动加载记忆系统.
-""")
-        else:
+        if not service.initialize():
             _send_message("初始化失败")
+            return
+        
+        _send_message("记忆系统初始化成功!")
+        _send_message(f"配置目录: {memory_dir}")
+        _send_message(f"数据库: {config.storage.db_path}")
+        
+        # 导入当前会话的历史消息
+        _send_message("")
+        _send_message("正在导入当前会话...")
+        current_count = await _import_current_session(soul, service)
+        if current_count > 0:
+            _send_message(f"已导入当前会话的 {current_count} 条消息")
+        
+        # 导入所有历史会话
+        _send_message("")
+        _send_message("正在导入历史会话...")
+        count = await _import_all_sessions(service)
+        
+        if count > 0:
+            _send_message(f"已导入 {count} 个历史会话")
+        else:
+            _send_message("没有找到需要导入的历史会话")
+        
+        _send_message("")
+        _send_message("记忆系统已就绪! 新对话将自动保存。")
         
         service.close()
         
     except Exception as e:
         _send_message(f"错误: {e}")
+
+
+async def _import_current_session(soul, service: MemoryService) -> int:
+    """导入当前会话的历史消息到记忆系统。
+    
+    Returns:
+        导入的消息数量
+    """
+    try:
+        # 获取当前会话ID
+        session_id = ""
+        if hasattr(soul, 'context') and soul.context:
+            session_id = getattr(soul.context, 'session_id', '')
+        
+        if not session_id:
+            return 0
+        
+        # 检查是否已存在
+        if service.get_session(session_id):
+            return 0
+        
+        # 获取当前会话的历史消息
+        history = getattr(soul.context, 'history', [])
+        if not history:
+            return 0
+        
+        # 创建会话
+        from kimi_cli.memory.models.data import Session, Message
+        
+        # 生成标题（使用第一条用户消息）
+        title = None
+        for msg in history:
+            if msg.role == "user":
+                content = msg.content
+                if isinstance(content, list):
+                    texts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+                    content = " ".join(texts)
+                title = (content[:50] + "...") if len(content) > 50 else content
+                break
+        
+        if not title:
+            title = f"Session {session_id[:8]}"
+        
+        session = Session(
+            id=session_id,
+            title=title,
+            work_dir=str(Path.cwd()),
+        )
+        service.storage.create_session(session)
+        
+        # 导入消息
+        imported_count = 0
+        total_tokens = 0
+        for msg in history:
+            if msg.role not in ("user", "assistant"):
+                continue
+            
+            # 提取内容
+            content = msg.content
+            if isinstance(content, list):
+                texts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+                content = " ".join(texts)
+            elif not isinstance(content, str):
+                content = str(content)
+            
+            if not content.strip():
+                continue
+            
+            message = Message(
+                session_id=session_id,
+                role=msg.role,
+                content=content,
+                token_count=len(content) // 4,  # 粗略估计
+            )
+            service.storage.add_message(message)
+            imported_count += 1
+            total_tokens += message.token_count
+        
+        # 更新会话token数
+        session.token_count = total_tokens
+        service.storage.update_session(session)
+        
+        # 触发索引
+        try:
+            service._index_manager.index_session(session_id)
+        except Exception:
+            pass
+        
+        return imported_count
+        
+    except Exception:
+        return 0
+
+
+async def _import_all_sessions(service: MemoryService) -> int:
+    """导入所有历史会话到记忆系统。
+    
+    Returns:
+        导入的会话数量
+    """
+    try:
+        from kimi_cli.memory.utils.importer import SessionImporter
+        
+        importer = SessionImporter(service)
+        stats = importer.import_all(dry_run=False)
+        
+        return stats.get('imported', 0)
+    except Exception:
+        return 0
 
 
 async def _cmd_status():
